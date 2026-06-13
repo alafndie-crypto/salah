@@ -1539,6 +1539,12 @@ function saveInvoice(){
   if(!date) { notify('التاريخ مطلوب','r');       el('fDate').focus(); return; }
   if(!amt || isNaN(parseFloat(amt)) || parseFloat(amt) < 0)
     { notify('المبلغ غير صحيح','r'); el('fAmt').focus(); return; }
+  var dupAmt = parseFloat(amt);
+  var dup = APP.invoices.find(function(x){
+    return x.invoiceNumber === num && x.supplier === sup && x.branch === br
+      && x.date === date && parseFloat(x.amount) === dupAmt;
+  });
+  if(dup){ notify('هذه الفاتورة موجودة مسبقاً بكل بياناتها (رقم الفاتورة، المورد، الفرع، التاريخ، المبلغ)','r'); return; }
   saving = true;
   el('btnSave').disabled = true;
   el('btnSave').textContent = 'جارٍ الحفظ...';
