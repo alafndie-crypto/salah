@@ -261,8 +261,6 @@ thead th,td{unicode-bidi:embed}
   flex-shrink:0;font-family:'Segoe UI','Tahoma',Arial,sans-serif;
 }
 .br-popup-item.highlighted .br-popup-num{background:#fff;color:var(--cop)}
-.br-popup-item.frozen{opacity:.45;cursor:not-allowed}
-.br-popup-item.frozen:hover{background:transparent;color:rgba(255,255,255,.75)}
 .br-popup-wrap{position:relative;display:block}
 
 /* ===== PRINT ===== */
@@ -656,62 +654,14 @@ function cfgSet(k, v, cb){
 }
 
 // ============ APP DATA ============
-var APP = { invoices:[], branches:["القريات الراقي","سكاكا 1","طبرجل الراقي","طبرجل المخفض","برزان","طريف","حائل الدائري","رفحاء 1","عرعر 1","القريات المخفض","نجران 1","سكاكا 2","شروره","رفحاء 2","عرعر 2","جدة","نجران 2","الحرازات"], frozen:[] };
-
-// الفروع المجمّدة افتراضياً (تُطبّق مرة واحدة فقط عند أول تشغيل بعد التحديث)
-var BASE_FROZEN = ["سكاكا 1","نجران 2"];
-function normBr(s){ return String(s||"").replace(/[\u064B-\u065F\u0640]/g,"").replace(/[أإآ]/g,"ا").replace(/ة/g,"ه").replace(/ى/g,"ي").replace(/\s+/g," ").trim(); }
-// يضمن وجود فرع الحرازات (رقم 18) دون تغيير ترتيب أو أسماء الفروع الموجودة
-function ensureBaseBranches(arr){
-  var has = arr.some(function(b){ return normBr(b).indexOf("حرازات") >= 0; });
-  if(!has){ arr.push("الحرازات"); return true; }
-  return false;
-}
-function isFrozen(name){ return APP.frozen.indexOf(name) >= 0; }
-function saveFrozen(cb){ cfgSet("frozenBranches", APP.frozen, cb); }
-
-// القائمة المرجعية للفروع (بهذا الترتيب والأرقام 1-18)
-var CANON_BRANCHES = ["القريات الراقي","سكاكا 1","طبرجل الراقي","طبرجل المخفض","برزان","طريف","حائل الدائري","رفحاء 1","عرعر 1","القريات المخفض","نجران 1","سكاكا 2","شروره","رفحاء 2","عرعر 2","جدة","نجران 2","الحرازات"];
-// دمج لمرة واحدة: يعيد ترتيب القائمة على المرجع ويُبقي أي فرع إضافي في آخرها، ولا يمس أسماء الفروع المخزّنة (الفواتير مرتبطة بالاسم)
-function canonicalMerge(cur){
-  var out = [];
-  CANON_BRANCHES.forEach(function(c){
-    var f = cur.filter(function(b){ return normBr(b) === normBr(c); })[0];
-    out.push(f !== undefined ? f : c);
-  });
-  cur.forEach(function(b){ if(out.indexOf(b) < 0) out.push(b); });
-  return out;
-}
+var APP = { invoices:[], branches:["القريات الراقي","سكاكا 1","طبرجل الراقي","طبرجل المخفض","برزان","طريف","حائل الدائري","رفحاء 1","عرعر 1","القريات المخفض","نجران 1","سكاكا 2","شروره","رفحاء 2","عرعر 2","جدة","نجران 2"] };
 
 function loadAll(cb){
   cfgGet('branches', null, function(br){
     if(br && br.length) APP.branches = br;
-    cfgGet('branchSync_v3', null, function(done){
-      var changed = false;
-      if(!done){ APP.branches = canonicalMerge(APP.branches); changed = true; }
-      if(ensureBaseBranches(APP.branches)) changed = true;
-      var afterFz = function(){
-        dbGetAll('invoices', function(invs){
-          APP.invoices = invs || [];
-          cb();
-        });
-      };
-      var afterBr = function(){
-        cfgGet('frozenBranches', null, function(fz){
-          var fzChanged = false;
-          if(Array.isArray(fz)) APP.frozen = fz; else { APP.frozen = []; fzChanged = true; }
-          if(!done || !Array.isArray(fz)){
-            // تجميد سكاكا 1 ونجران 2 (مطابقة بالاسم فقط) لمرة واحدة
-            BASE_FROZEN.forEach(function(n){
-              var f = APP.branches.filter(function(b){ return normBr(b) === normBr(n); })[0];
-              if(f && APP.frozen.indexOf(f) < 0){ APP.frozen.push(f); fzChanged = true; }
-            });
-          }
-          var fin = function(){ if(!done) cfgSet('branchSync_v3', true, afterFz); else afterFz(); };
-          if(fzChanged) saveFrozen(fin); else fin();
-        });
-      };
-      if(changed) saveBranches(afterBr); else afterBr();
+    dbGetAll('invoices', function(invs){
+      APP.invoices = invs || [];
+      cb();
     });
   });
 }
@@ -865,8 +815,7 @@ function applyF(list, search, br, status, sort, dateFrom, dateTo){
       return x.invoiceNumber.toLowerCase().indexOf(s) >= 0 || x.supplier.toLowerCase().indexOf(s) >= 0;
     });
   }
-  if(br === '__unknown__') out = out.filter(function(x){ return APP.branches.indexOf(x.branch) < 0; });
-  else if(br) out = out.filter(function(x){ return x.branch === br || normBr(x.branch) === normBr(br); });
+  if(br) out = out.filter(function(x){ return x.branch === br; });
   if(status === 'pending')  out = out.filter(function(x){ return !x.received; });
   if(status === 'received') out = out.filter(function(x){ return x.received; });
   if(dateFrom) out = out.filter(function(x){ return x.date >= dateFrom; });
@@ -1021,7 +970,7 @@ function brName(n){
 }
 function brList(id, listId){
   var dl = el(listId); if(!dl) return;
-  dl.innerHTML = APP.branches.filter(function(b){ return !isFrozen(b); }).map(function(b,i){ return '<option value="' + esc(b) + '">'; }).join('');
+  dl.innerHTML = APP.branches.map(function(b,i){ return '<option value="' + esc(b) + '">'; }).join('');
 }
 
 // ====== BRANCH POPUP PICKER ======
@@ -1031,28 +980,19 @@ function closeBrPopup(){
   if(_brPopupActive){ _brPopupActive.classList.remove('open'); _brPopupActive = null; }
 }
 
-function brBlocked(name, inpId){
-  if(!isFrozen(name)) return false;
-  if(inpId === 'eBr' && editId){
-    var cur = APP.invoices.find(function(x){ return x.id === editId; });
-    if(cur && cur.branch === name) return false;
-  }
-  return true;
-}
-function buildBrPopup(popupEl, highlightIdx, inpId){
+function buildBrPopup(popupEl, highlightIdx){
   popupEl.innerHTML = APP.branches.map(function(b, i){
     var num = i + 1;
-    var blocked = brBlocked(b, inpId);
-    var cls = 'br-popup-item' + (highlightIdx === num ? ' highlighted' : '') + (blocked ? ' frozen' : '');
+    var cls = 'br-popup-item' + (highlightIdx === num ? ' highlighted' : '');
     return '<div class="' + cls + '" data-bridx="' + num + '">'
       + '<span class="br-popup-num">' + num + '</span>'
-      + '<span>' + esc(b) + (blocked ? ' 🔒 مجمّد' : '') + '</span>'
+      + '<span>' + esc(b) + '</span>'
       + '</div>';
   }).join('');
 }
 
 function openBrPopup(inp, popupEl, highlightIdx){
-  buildBrPopup(popupEl, highlightIdx, inp.id);
+  buildBrPopup(popupEl, highlightIdx);
   popupEl.classList.add('open');
   _brPopupActive = popupEl;
   // scroll highlighted item into view
@@ -1068,7 +1008,6 @@ function openBrPopup(inp, popupEl, highlightIdx){
     if(!item) return;
     var idx = parseInt(item.getAttribute('data-bridx'), 10);
     if(idx && APP.branches[idx-1]){
-      if(brBlocked(APP.branches[idx-1], inp.id)){ notify('الفرع مجمّد ولا يقبل فواتير جديدة','r'); return; }
       inp.value = APP.branches[idx-1];
       closeBrPopup();
       // move to next field
@@ -1087,7 +1026,6 @@ function setupBrInput(id){
     var v = inp.value.trim();
     var n = brNum(v);
     if(n){
-      if(brBlocked(APP.branches[n-1], inp.id)){ notify('الفرع "' + APP.branches[n-1] + '" مجمّد ولا يقبل فواتير جديدة','r'); inp.value = ''; closeBrPopup(); return; }
       inp.value = APP.branches[n-1];
       closeBrPopup();
       if(moveNext){
@@ -1125,7 +1063,6 @@ function setupBrInput(id){
       var v = inp.value.trim();
       var n = brNum(v);
       if(n){
-        if(brBlocked(APP.branches[n-1], inp.id)){ notify('الفرع "' + APP.branches[n-1] + '" مجمّد ولا يقبل فواتير جديدة','r'); inp.value = ''; closeBrPopup(); return; }
         inp.value = APP.branches[n-1];
         closeBrPopup();
         var nxt = inp.getAttribute('data-next');
@@ -1153,9 +1090,7 @@ function fillBrSels(){
     var e = el(sid); if(!e) return;
     var cur = e.value;
     e.innerHTML = '<option value="">-- كل الفروع --</option>';
-    APP.branches.forEach(function(b, i){ var o=document.createElement('option'); o.value=b; o.textContent=(i+1)+' - '+b+(isFrozen(b)?' (مجمّد)':''); e.appendChild(o); });
-    var unk = APP.invoices.filter(function(x){ return APP.branches.indexOf(x.branch) < 0; }).length;
-    if(unk){ var ou=document.createElement('option'); ou.value='__unknown__'; ou.textContent='⚠ فواتير بفرع غير معرّف (' + unk + ')'; e.appendChild(ou); }
+    APP.branches.forEach(function(b, i){ var o=document.createElement('option'); o.value=b; o.textContent=(i+1)+' - '+b; e.appendChild(o); });
     e.value = cur;
   });
 }
@@ -1437,13 +1372,9 @@ function renderSet(){
   list.innerHTML = APP.branches.map(function(b, i){
     var used = APP.invoices.some(function(x){ return x.branch === b; });
     var btns = '<button class="bxs" style="background:#e3f2fd;color:#1565c0;font-size:11px" data-action="editbr" data-idx="' + i + '">تعديل</button>';
-    var fz = isFrozen(b);
-    btns += fz
-      ? '<button class="bxs" style="background:#e8f5e9;color:#2e7d32;font-size:11px" data-action="frzbr" data-idx="' + i + '">إلغاء التجميد</button>'
-      : '<button class="bxs" style="background:#fff3e0;color:#e65100;font-size:11px" data-action="frzbr" data-idx="' + i + '">تجميد الفرع</button>';
     if(!used) btns += '<button class="bxs" style="background:var(--rdb);color:var(--rd);font-size:11px" data-action="delbr" data-idx="' + i + '">حذف</button>';
     else btns += '<span style="font-size:11px;color:var(--gr);background:var(--bg);padding:3px 8px;border-radius:6px">مرتبط</span>';
-    return '<li><span><span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--cop);color:#fff;font-size:12px;font-weight:900;margin-left:10px">' + (i+1) + '</span>' + esc(b) + (fz ? ' <span style="font-size:11px;color:#e65100;background:#fff3e0;padding:2px 8px;border-radius:6px;margin-right:6px">🔒 مجمّد</span>' : '') + '</span><span style="display:flex;gap:6px">' + btns + '</span></li>';
+    return '<li><span><span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--cop);color:#fff;font-size:12px;font-weight:900;margin-left:10px">' + (i+1) + '</span>' + esc(b) + '</span><span style="display:flex;gap:6px">' + btns + '</span></li>';
   }).join('') || '<li style="color:var(--gr);text-align:center;padding:18px">لا توجد فروع</li>';
   var amt = APP.invoices.reduce(function(a,x){ return a+(parseFloat(x.amount)||0); }, 0);
   el('sysStats').innerHTML =
@@ -1531,7 +1462,6 @@ function saveEdit(){
   if(!editId){ notify('خطأ في تحديد الفاتورة','r'); return; }
   var inv = APP.invoices.find(function(x){ return x.id === editId; });
   if(!inv){ notify('الفاتورة غير موجودة','r'); return; }
-  if(isFrozen(br) && inv.branch !== br){ notify('الفرع "' + br + '" مجمّد ولا يمكن نقل فواتير إليه','r'); return; }
   saving = true;
   el('btnSE').disabled = true;
   el('btnSE').textContent = 'جارٍ الحفظ...';
@@ -1606,7 +1536,6 @@ function saveInvoice(){
   if(!/^[0-9]+$/.test(num)) { notify('رقم الفاتورة يجب أن يكون أرقاماً فقط','r'); el('fNum').focus(); return; }
   if(!sup)  { notify('اسم المورد مطلوب','r');    el('fSup').focus();  return; }
   if(!br)   { notify('اختر الفرع','r');          el('fBr').focus();   return; }
-  if(isFrozen(br)){ notify('الفرع "' + br + '" مجمّد ولا يقبل فواتير جديدة','r'); el('fBr').focus(); return; }
   if(!date) { notify('التاريخ مطلوب','r');       el('fDate').focus(); return; }
   if(!amt || isNaN(parseFloat(amt)) || parseFloat(amt) < 0)
     { notify('المبلغ غير صحيح','r'); el('fAmt').focus(); return; }
@@ -1674,26 +1603,8 @@ function delBranch(idx){
   }
   confirm2('حذف الفرع "' + b + '"?', function(){
     APP.branches.splice(idx, 1);
-    if(APP.frozen.indexOf(b) >= 0){ APP.frozen = APP.frozen.filter(function(x){ return x !== b; }); saveFrozen(); }
     saveBranches(function(){ fillBrSels(); renderSet(); notify('تم حذف الفرع','g'); });
   });
-}
-
-function toggleFreeze(idx){
-  var b = APP.branches[idx]; if(!b) return;
-  if(isFrozen(b)){
-    confirm2('إلغاء تجميد الفرع "' + b + '"؟ سيقبل إدخال فواتير جديدة مرة أخرى.', function(){
-      APP.frozen = APP.frozen.filter(function(x){ return x !== b; });
-      saveFrozen(function(){ fillBrSels(); renderSet(); notify('تم إلغاء تجميد الفرع','g'); });
-    });
-  } else {
-    var pend = APP.invoices.filter(function(x){ return x.branch === b && !x.received; }).length;
-    confirm2('تجميد الفرع "' + b + '"؟ لن يقبل فواتير جديدة. فواتيره الحالية تبقى كما هي'
-      + (pend ? ' (' + pend + ' قيد الانتظار، ويمكن استلامها وإنهاؤها كالمعتاد)' : '') + '.', function(){
-      if(APP.frozen.indexOf(b) < 0) APP.frozen.push(b);
-      saveFrozen(function(){ fillBrSels(); renderSet(); notify('تم تجميد الفرع','g'); });
-    });
-  }
 }
 
 var editBrIdx = -1;
@@ -1713,8 +1624,6 @@ el('btnSaveEditBr').addEventListener('click', function(){
   if(APP.branches.indexOf(v) >= 0 && v !== APP.branches[editBrIdx]){ notify('الاسم موجود مسبقاً','r'); return; }
   var old = APP.branches[editBrIdx];
   APP.branches[editBrIdx] = v;
-  var fzI = APP.frozen.indexOf(old);
-  if(fzI >= 0){ APP.frozen[fzI] = v; saveFrozen(); }
   // تحديث الفواتير المرتبطة
   var updateCount = 0;
   APP.invoices.forEach(function(inv){
@@ -1764,7 +1673,7 @@ function exportExcel(){
 }
 
 function exportBackup(){
-  var data = { invoices:APP.invoices, branches:APP.branches, frozen:APP.frozen, branchSync:true, date:new Date().toISOString() };
+  var data = { invoices:APP.invoices, branches:APP.branches, date:new Date().toISOString() };
   var a = document.createElement('a');
   a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(data, null, 2));
   a.download = 'asalah_v2_backup_' + new Date().toISOString().slice(0,10) + '.json';
@@ -1785,23 +1694,10 @@ function importBackup(input){
         for(var i=0;i<d.invoices.length;i+=CHUNK) chunks.push(d.invoices.slice(i,i+CHUNK));
         var doChunk = function(idx){
           if(idx >= chunks.length){
-            var nb = d.branches.slice();
-            var nf = Array.isArray(d.frozen) ? d.frozen.slice() : APP.frozen.slice();
-            if(!d.branchSync){
-              // نسخة قديمة (قبل التحديث): ندمجها على القائمة المرجعية حتى لا تعود الفروع إلى 16 ويضيع التجميد
-              nb = canonicalMerge(nb);
-              BASE_FROZEN.forEach(function(n){
-                var f = nb.filter(function(b){ return normBr(b) === normBr(n); })[0];
-                if(f && nf.indexOf(f) < 0) nf.push(f);
-              });
-            }
-            ensureBaseBranches(nb);
-            cfgSet('branches', nb, function(){
-              cfgSet('frozenBranches', nf, function(){
-                APP.invoices = d.invoices; APP.branches = nb; APP.frozen = nf;
-                fillBrSels(); updateStats(); renderPend(); renderAll(); renderArch(); renderSet();
-                notify('تم استعادة ' + d.invoices.length + ' فاتورة','g');
-              });
+            cfgSet('branches', d.branches, function(){
+              APP.invoices = d.invoices; APP.branches = d.branches;
+              fillBrSels(); updateStats(); renderPend(); renderAll(); renderArch(); renderSet();
+              notify('تم استعادة ' + d.invoices.length + ' فاتورة','g');
             }); return;
           }
           var tx = DB.transaction('invoices', 'readwrite');
@@ -2079,7 +1975,6 @@ document.addEventListener('click', function(e){
   if(action==='opendetimg'){ el('imgModalSrc').src = e.target.src; openM('imgModal'); }
   if(action==='delbr')   delBranch(idx);
   if(action==='editbr')  startEditBranch(idx);
-  if(action==='frzbr')   toggleFreeze(idx);
 });
 
 function addFL(ids, fn){
