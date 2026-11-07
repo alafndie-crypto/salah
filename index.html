@@ -670,29 +670,49 @@ function ensureBaseBranches(arr){
 function isFrozen(name){ return APP.frozen.indexOf(name) >= 0; }
 function saveFrozen(cb){ cfgSet("frozenBranches", APP.frozen, cb); }
 
+// القائمة المرجعية للفروع (بهذا الترتيب والأرقام 1-18)
+var CANON_BRANCHES = ["القريات الراقي","سكاكا 1","طبرجل الراقي","طبرجل المخفض","برزان","طريف","حائل الدائري","رفحاء 1","عرعر 1","القريات المخفض","نجران 1","سكاكا 2","شروره","رفحاء 2","عرعر 2","جدة","نجران 2","الحرازات"];
+// دمج لمرة واحدة: يعيد ترتيب القائمة على المرجع ويُبقي أي فرع إضافي في آخرها، ولا يمس أسماء الفروع المخزّنة (الفواتير مرتبطة بالاسم)
+function canonicalMerge(cur){
+  var out = [];
+  CANON_BRANCHES.forEach(function(c){
+    var f = cur.filter(function(b){ return normBr(b) === normBr(c); })[0];
+    out.push(f !== undefined ? f : c);
+  });
+  cur.forEach(function(b){ if(out.indexOf(b) < 0) out.push(b); });
+  return out;
+}
+
 function loadAll(cb){
   cfgGet('branches', null, function(br){
     if(br && br.length) APP.branches = br;
-    var changed = ensureBaseBranches(APP.branches);
-    var afterBr = function(){
-      cfgGet('frozenBranches', null, function(fz){
-        if(Array.isArray(fz)){ APP.frozen = fz; afterFz(); return; }
-        // أول تشغيل: تجميد سكاكا 1 ونجران 2 (مطابقة بالاسم فقط)
-        APP.frozen = [];
-        BASE_FROZEN.forEach(function(n){
-          var f = APP.branches.filter(function(b){ return normBr(b) === normBr(n); })[0];
-          if(f) APP.frozen.push(f);
+    cfgGet('branchSync_v3', null, function(done){
+      var changed = false;
+      if(!done){ APP.branches = canonicalMerge(APP.branches); changed = true; }
+      if(ensureBaseBranches(APP.branches)) changed = true;
+      var afterFz = function(){
+        dbGetAll('invoices', function(invs){
+          APP.invoices = invs || [];
+          cb();
         });
-        saveFrozen(function(){ afterFz(); });
-      });
-    };
-    var afterFz = function(){
-      dbGetAll('invoices', function(invs){
-        APP.invoices = invs || [];
-        cb();
-      });
-    };
-    if(changed) saveBranches(afterBr); else afterBr();
+      };
+      var afterBr = function(){
+        cfgGet('frozenBranches', null, function(fz){
+          var fzChanged = false;
+          if(Array.isArray(fz)) APP.frozen = fz; else { APP.frozen = []; fzChanged = true; }
+          if(!done || !Array.isArray(fz)){
+            // تجميد سكاكا 1 ونجران 2 (مطابقة بالاسم فقط) لمرة واحدة
+            BASE_FROZEN.forEach(function(n){
+              var f = APP.branches.filter(function(b){ return normBr(b) === normBr(n); })[0];
+              if(f && APP.frozen.indexOf(f) < 0){ APP.frozen.push(f); fzChanged = true; }
+            });
+          }
+          var fin = function(){ if(!done) cfgSet('branchSync_v3', true, afterFz); else afterFz(); };
+          if(fzChanged) saveFrozen(fin); else fin();
+        });
+      };
+      if(changed) saveBranches(afterBr); else afterBr();
+    });
   });
 }
 
