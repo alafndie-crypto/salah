@@ -865,7 +865,8 @@ function applyF(list, search, br, status, sort, dateFrom, dateTo){
       return x.invoiceNumber.toLowerCase().indexOf(s) >= 0 || x.supplier.toLowerCase().indexOf(s) >= 0;
     });
   }
-  if(br) out = out.filter(function(x){ return x.branch === br; });
+  if(br === '__unknown__') out = out.filter(function(x){ return APP.branches.indexOf(x.branch) < 0; });
+  else if(br) out = out.filter(function(x){ return x.branch === br || normBr(x.branch) === normBr(br); });
   if(status === 'pending')  out = out.filter(function(x){ return !x.received; });
   if(status === 'received') out = out.filter(function(x){ return x.received; });
   if(dateFrom) out = out.filter(function(x){ return x.date >= dateFrom; });
@@ -1153,6 +1154,8 @@ function fillBrSels(){
     var cur = e.value;
     e.innerHTML = '<option value="">-- كل الفروع --</option>';
     APP.branches.forEach(function(b, i){ var o=document.createElement('option'); o.value=b; o.textContent=(i+1)+' - '+b+(isFrozen(b)?' (مجمّد)':''); e.appendChild(o); });
+    var unk = APP.invoices.filter(function(x){ return APP.branches.indexOf(x.branch) < 0; }).length;
+    if(unk){ var ou=document.createElement('option'); ou.value='__unknown__'; ou.textContent='⚠ فواتير بفرع غير معرّف (' + unk + ')'; e.appendChild(ou); }
     e.value = cur;
   });
 }
@@ -1761,7 +1764,7 @@ function exportExcel(){
 }
 
 function exportBackup(){
-  var data = { invoices:APP.invoices, branches:APP.branches, frozen:APP.frozen, date:new Date().toISOString() };
+  var data = { invoices:APP.invoices, branches:APP.branches, frozen:APP.frozen, branchSync:true, date:new Date().toISOString() };
   var a = document.createElement('a');
   a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(data, null, 2));
   a.download = 'asalah_v2_backup_' + new Date().toISOString().slice(0,10) + '.json';
@@ -1782,8 +1785,17 @@ function importBackup(input){
         for(var i=0;i<d.invoices.length;i+=CHUNK) chunks.push(d.invoices.slice(i,i+CHUNK));
         var doChunk = function(idx){
           if(idx >= chunks.length){
-            var nb = d.branches.slice(); ensureBaseBranches(nb);
-            var nf = Array.isArray(d.frozen) ? d.frozen : APP.frozen;
+            var nb = d.branches.slice();
+            var nf = Array.isArray(d.frozen) ? d.frozen.slice() : APP.frozen.slice();
+            if(!d.branchSync){
+              // نسخة قديمة (قبل التحديث): ندمجها على القائمة المرجعية حتى لا تعود الفروع إلى 16 ويضيع التجميد
+              nb = canonicalMerge(nb);
+              BASE_FROZEN.forEach(function(n){
+                var f = nb.filter(function(b){ return normBr(b) === normBr(n); })[0];
+                if(f && nf.indexOf(f) < 0) nf.push(f);
+              });
+            }
+            ensureBaseBranches(nb);
             cfgSet('branches', nb, function(){
               cfgSet('frozenBranches', nf, function(){
                 APP.invoices = d.invoices; APP.branches = nb; APP.frozen = nf;
